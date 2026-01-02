@@ -16,15 +16,21 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           api-level: 34
-          ndk-version: 26.1.10909125 # Matches Snapdragon 8 Gen 3/Elite requirements
+          ndk-version: 26.1.10909125
 
       - name: Build Android CPU RPC (Proxy)
         run: |
           cd tvm
           mkdir build_android && cd build_android
           
-          # We use the ROOT CMakeLists.txt for the CPU Proxy
+          # THE FIX: Force CMake Policy and Bypass Compiler Check
+          # This stops the 'Configuring incomplete' AHHHHHHHH error
           cmake .. \
+            -DCMAKE_POLICY_DEFAULT_CMP0000=NEW \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_ANDROID_NDK=$ANDROID_NDK_ROOT \
+            -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
+            -DCMAKE_ANDROID_STL_TYPE=c++_static \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-28 \
@@ -32,23 +38,20 @@ jobs:
             -DUSE_HEXAGON=ON \
             -DUSE_LIBBACKTRACE=OFF
           
-          # Target only the RPC binary to avoid the 59% hang
           make tvm_rpc -j$(nproc)
 
       - name: Build Hexagon NPU Runtime (Skeleton)
         run: |
           cd tvm
-          # DO NOT run cmake in apps/cpp_rpc. 
-          # You MUST build it as a specialized target from a fresh build dir.
+          # Use the root build to generate the Hexagon Skel
+          # 2026 requires the HEXAGON_RPC_SKEL target explicitly
           mkdir build_hexagon && cd build_hexagon
           
           cmake .. \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
             -DUSE_HEXAGON_RPC=ON \
-            -DUSE_HEXAGON_ARCH=v75 # v75 for 8Gen3, v79 for 8Elite
+            -DUSE_HEXAGON_ARCH=v75
             
-          # This specifically triggers the 'runtime' target for the Hexagon NPU
           make hexagon_rpc_skel -j$(nproc)
 
       - name: Upload Artifacts
