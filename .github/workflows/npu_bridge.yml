@@ -2,56 +2,59 @@ name: Build NPU RPC Bridge
 on: [push]
 
 jobs:
-  build-npu-bridge:
+  build-bridge:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout TVM
+        uses: actions/checkout@v4
         with:
+          repository: 'apache/tvm'
           submodules: 'recursive'
+          path: 'tvm'
 
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
         with:
           api-level: 34
-          ndk-version: 26.1.10909125 # Verified for Snapdragon 8 Gen 3/Elite drivers
+          ndk-version: 26.1.10909125 # Matches Snapdragon 8 Gen 3/Elite requirements
 
-      # We manually download the Hexagon SDK stubs needed for compilation
-      # because the full SDK is proprietary and too large for standard runners
-      - name: Setup Hexagon SDK Stubs
+      - name: Build Android CPU RPC (Proxy)
         run: |
-          mkdir -p ./hexagon_sdk/stubs
-          # In a real scenario, you would wget the specific headers/libs 
-          # or use a private secret to fetch your licensed SDK
-          echo "Setting up compilation environment for v75/v79 architecture..."
-
-      - name: Build Android RPC Server (AArch64)
-        run: |
+          cd tvm
           mkdir build_android && cd build_android
+          
+          # We use the ROOT CMakeLists.txt for the CPU Proxy
           cmake .. \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-28 \
-            -DUSE_RPC=ON \
             -DUSE_CPP_RPC=ON \
             -DUSE_HEXAGON=ON \
-            -DUSE_HEXAGON_SDK=../hexagon_sdk
+            -DUSE_LIBBACKTRACE=OFF
+          
+          # Target only the RPC binary to avoid the 59% hang
           make tvm_rpc -j$(nproc)
 
-      - name: Build Hexagon NPU Skeleton (HTP)
+      - name: Build Hexagon NPU Runtime (Skeleton)
         run: |
+          cd tvm
+          # DO NOT run cmake in apps/cpp_rpc. 
+          # You MUST build it as a specialized target from a fresh build dir.
           mkdir build_hexagon && cd build_hexagon
-          # This builds the 'skel' library that runs inside the NPU
+          
           cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
             -DUSE_HEXAGON_RPC=ON \
-            -DUSE_HEXAGON_ARCH=v75 \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++
-          make runtime -j$(nproc)
+            -DUSE_HEXAGON_ARCH=v75 # v75 for 8Gen3, v79 for 8Elite
+            
+          # This specifically triggers the 'runtime' target for the Hexagon NPU
+          make hexagon_rpc_skel -j$(nproc)
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: npu-bridge-package
+          name: npu-bridge-2026
           path: |
-            build_android/tvm_rpc
-            build_hexagon/libhexagon_rpc_skel.so
+            tvm/build_android/tvm_rpc
+            tvm/build_hexagon/libhexagon_rpc_skel.so
