@@ -1,0 +1,48 @@
+name: Build NPU RPC Bridge
+on: [push]
+
+jobs:
+  build-android-rpc:
+    runs-on: ubuntu-latest
+    container: 
+      image: tlcpack/package-android:latest # TVM's official 2026 build container
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: true }
+
+      - name: Build Android CPU RPC
+        run: |
+          mkdir build_android && cd build_android
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DUSE_CPP_RPC=ON -DUSE_HEXAGON=ON -DUSE_HEXAGON_SDK=/opt/qcom/hexagon_sdk
+          make tvm_rpc -j$(nproc)
+
+      - name: Upload Android Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-rpc-bin
+          path: build_android/tvm_rpc
+
+  build-hexagon-rpc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      # 2026 Hack: Using the Hexagon SDK provided by a Docker action 
+      # or a secret-downloaded installer
+      - name: Setup Hexagon Toolchain
+        run: ./scripts/setup_hexagon_sdk.sh 
+        
+      - name: Build Hexagon NPU Runtime
+        run: |
+          mkdir build_hexagon && cd build_hexagon
+          cmake .. -DUSE_HEXAGON_RPC=ON -DUSE_HEXAGON_ARCH=v75
+          make runtime -j$(nproc)
+
+      - name: Upload Hexagon Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexagon-skel-bin
+          path: build_hexagon/libhexagon_rpc_skel.so
