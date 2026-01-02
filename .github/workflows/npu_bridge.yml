@@ -2,58 +2,54 @@ name: Build NPU RPC Bridge
 on: [push]
 
 jobs:
-  build-bridge:
+  manual-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout TVM
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: 'apache/tvm'
           submodules: 'recursive'
           path: 'tvm'
 
-      - name: Setup Android NDK
+      - name: Setup NDK
         uses: android-actions/setup-android@v3
         with:
           api-level: 34
           ndk-version: 26.1.10909125
 
-      - name: Build Android CPU RPC (Proxy)
+      - name: Manual Compile RPC Server
         run: |
-          cd tvm
-          mkdir build_android && cd build_android
+          # Define paths
+          NDK_TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
+          export PATH=$NDK_TOOLCHAIN:$PATH
           
-          # THE FIX: Explicitly disable the new 2026 CMake Toolchain logic 
-          # which causes the -fuse-ld=lld explosion.
-          cmake .. \
-            -DANDROID_USE_LEGACY_TOOLCHAIN_FILE=ON \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-28 \
-            -DUSE_CPP_RPC=ON \
-            -DUSE_HEXAGON=ON \
-            -DUSE_LIBBACKTRACE=OFF
+          cd tvm/apps/cpp_rpc
           
-          make tvm_rpc -j$(nproc)
-
-      - name: Build Hexagon NPU Skeleton
-        run: |
-          cd tvm
-          mkdir build_hexagon && cd build_hexagon
-          
-          # Same fix for the NPU side
-          cmake .. \
-            -DANDROID_USE_LEGACY_TOOLCHAIN_FILE=ON \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
-            -DUSE_HEXAGON_RPC=ON \
-            -DUSE_HEXAGON_ARCH=v75
+          # Compile the RPC server directly using NDK Clang
+          # This skips all the CMake 'TryCompile' bullshit
+          aarch64-linux-android34-clang++ -O3 -std=c++17 \
+            -I../../include \
+            -I../../3rdparty/dmlc-core/include \
+            -I../../3rdparty/rang/include \
+            main.cc rpc_server.cc \
+            -o tvm_rpc \
+            -llog -v
             
-          make hexagon_rpc_skel -j$(nproc)
-
-      - name: Upload Binaries
+      - name: Manual Compile Hexagon Skeleton
+        run: |
+          cd tvm/src/runtime/hexagon/rpc
+          # This compiles the HTP bridge skeleton
+          # We use the HTP-specific headers from the TVM tree
+          aarch64-linux-android34-clang++ -O3 -shared -fPIC \
+            -I../../../../include \
+            -I../../../../src/runtime/hexagon \
+            hexagon_rpc_skel.cc \
+            -o libhexagon_rpc_skel.so
+            
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: npu-bridge-2026
+          name: bridge-binaries
           path: |
-            tvm/build_android/tvm_rpc
-            tvm/build_hexagon/libhexagon_rpc_skel.so
+            tvm/apps/cpp_rpc/tvm_rpc
+            tvm/src/runtime/hexagon/rpc/libhexagon_rpc_skel.so
