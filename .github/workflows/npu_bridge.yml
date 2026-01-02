@@ -23,14 +23,10 @@ jobs:
           cd tvm
           mkdir build_android && cd build_android
           
-          # THE FIX: Force CMake Policy and Bypass Compiler Check
-          # This stops the 'Configuring incomplete' AHHHHHHHH error
+          # THE FIX: Explicitly disable the new 2026 CMake Toolchain logic 
+          # which causes the -fuse-ld=lld explosion.
           cmake .. \
-            -DCMAKE_POLICY_DEFAULT_CMP0000=NEW \
-            -DCMAKE_SYSTEM_NAME=Android \
-            -DCMAKE_ANDROID_NDK=$ANDROID_NDK_ROOT \
-            -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
-            -DCMAKE_ANDROID_STL_TYPE=c++_static \
+            -DANDROID_USE_LEGACY_TOOLCHAIN_FILE=ON \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-28 \
@@ -40,21 +36,21 @@ jobs:
           
           make tvm_rpc -j$(nproc)
 
-      - name: Build Hexagon NPU Runtime (Skeleton)
+      - name: Build Hexagon NPU Skeleton
         run: |
           cd tvm
-          # Use the root build to generate the Hexagon Skel
-          # 2026 requires the HEXAGON_RPC_SKEL target explicitly
           mkdir build_hexagon && cd build_hexagon
           
+          # Same fix for the NPU side
           cmake .. \
+            -DANDROID_USE_LEGACY_TOOLCHAIN_FILE=ON \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
             -DUSE_HEXAGON_RPC=ON \
             -DUSE_HEXAGON_ARCH=v75
             
           make hexagon_rpc_skel -j$(nproc)
 
-      - name: Upload Artifacts
+      - name: Upload Binaries
         uses: actions/upload-artifact@v4
         with:
           name: npu-bridge-2026
